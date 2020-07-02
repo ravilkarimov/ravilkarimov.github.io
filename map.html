@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <title>LogX - Map</title>
+
+    <!-- css -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.6.0/dist/leaflet.css"
+    integrity="sha512-xwE/Az9zrjBIphAcBb3F6JVqxf46+CDLwfLMHloNu6KEQCAWi6HcDUbeOfBIptF7tcCzusKFjFw2yuvEpDL9wQ=="
+    crossorigin=""/>
+    <!-- Make sure you put this AFTER Leaflet's CSS -->
+    <script src="https://unpkg.com/leaflet@1.6.0/dist/leaflet.js"
+    integrity="sha512-gZwIG9x3wUXg2hdXF6+rVkLF/0Vi9U8D2Ntg4Ga5I5BZpVkVxlJWbSQtXPSiUTtC0TjtGOmxa1AJPuV0CPthew=="
+    crossorigin=""></script>
+
+    <style>
+        body {
+            margin: 0px;
+        }
+        #mapid { height: 100vw; }
+    </style>
+</head>
+<body>
+
+    <div id="mapid"></div>
+
+<!-- js -->
+<script
+        src="https://code.jquery.com/jquery-3.4.1.min.js"
+        integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo="
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-textpath@1.2.0/leaflet.textpath.min.js"></script>
+<script src="./points.js"></script>
+
+<script>
+
+    var $mymap = L.map('mapid').setView([48.762,67.375], 5);
+
+    var $markers = {};
+
+    var $icon = L.Icon.extend({
+        options: {
+            iconAnchor:   [16, 34],
+            popupAnchor:  [0, -15]
+        }
+    })
+    var $startIcon = new $icon({iconUrl: 'start.png'}),
+        $warehouseIcon = new $icon({iconUrl: 'boxes.png'}),
+        $endIcon = new $icon({iconUrl: 'end.png'});
+
+    var $ctr = 0;
+
+    function getRandomColor() {
+        var letters = '0123456789ABCDEF';
+        var color = '#';
+        for (var i = 0; i < 6; i++) {
+            color += letters[Math.floor(Math.random() * 16)];
+        }
+        return color;
+    }
+
+    function drawMarker(marker_data, tooltip_text) {
+        var iconStyle = {};
+        switch (marker_data.type) {
+            case "start":
+                iconStyle = $startIcon;
+                break;
+            case "warehouse":
+                iconStyle = $warehouseIcon;
+                break;
+            case "end":
+                iconStyle = $endIcon;
+                break;
+        }
+        var marker = L.marker([marker_data.points[0], marker_data.points[1]], {icon: iconStyle}).addTo($mymap);
+        marker.bindPopup(tooltip_text);
+    }
+
+    function drawRoutePolyline(steps) {
+
+        var latlngs = [];
+        steps.forEach(function(steps) {
+            steps.intersections.forEach(function (elem) {
+                latlngs.push(elem.location.reverse())
+            });
+        });
+        // var color = getRandomColor();
+        var polyline = L.polyline(latlngs, {color: "orange"}).addTo($mymap);
+        // polyline.setText('app_id: ' + app.app_id + ' weight: ' + app.weight, {center: true, offset: 10, attributes: {fill: color, style: {'font-size': 44}}});
+        $mymap.fitBounds(polyline.getBounds());
+
+    } 
+
+    function addMarker(point, app) {
+
+        if ($markers[point.points] === undefined) {
+            var marker = {
+                "points": point.points,
+                "type": point.type,
+                "apps": [
+                    {
+                        "app_id": app.app_id,
+                        "weight": app.weight
+                    }
+            ]}
+            $markers[marker.points] = marker;
+        } else {
+            var app = {"app_id": app.app_id, "weight": app.weight};
+            $markers[point.points].apps.push(app);
+        }
+    } 
+
+    function drawAllMarkers() {
+
+        for (var key in $markers) {
+            tooltip_text = "";
+            // console.log($markers[key].apps);
+            for (var app in $markers[key].apps) {
+                a = $markers[key].apps[app];
+                tooltip_text += `<b>app_id: </b>${a.app_id}<br><b>weight: </b>${a.weight}<br>`;
+            }
+            drawMarker($markers[key], tooltip_text);
+        }
+
+
+    }
+
+    function getRoute(app, l) {
+        path = app.path;
+        var url = 'http://84.201.161.64:5000/route/v1/driving/';
+        var url_tail = '?overview=false&alternatives=true&steps=true';
+        
+        for (var i = 1; i !== path.length; ++i) {
+
+            var j = i;
+            var A = path[--j];
+            var B = path[i];
+
+            i === 1 ? addMarker(A, app) : undefined;
+            i !== path.length ? addMarker(B, app): undefined;
+
+            var url_params = A.points[1] + ','+ A.points[0] +';'+ B.points[1] +','+ B.points[0];
+
+            console.log(url);
+            $.get(url + url_params + url_tail, function(data) {
+                drawRoutePolyline(data.routes[0].legs[0].steps);
+            });
+        }
+        $ctr++;
+        if ($ctr === l) {
+            drawAllMarkers();
+        }
+    }
+
+    function renderMap() {
+        L.tileLayer('https://api.mapbox.com/styles/v1/{id}/tiles/{z}/{x}/{y}?access_token={accessToken}', {
+            attribution: 'Map data &copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors, <a href="https://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, Imagery © <a href="https://www.mapbox.com/">Mapbox</a>',
+            maxZoom: 18,
+            id: 'mapbox/dark-v10',
+            tileSize: 512,
+            zoomOffset: -1,
+            accessToken: 'pk.eyJ1IjoicnJhdmlsIiwiYSI6ImNqY245bDZwbTBxcG0zM24wMWd5MHAyOXgifQ.cS4oq2Ikf-4AKCbF0mye2g'
+        }).addTo($mymap);
+
+        var time = 0;
+        $appList.forEach(function(app, i, array) {
+            setTimeout(function() {
+                getRoute(app, array.length);
+            }, time);
+            time += 1000;
+        });
+    }
+
+    $(document).ready(function() {
+        renderMap();
+    })
+</script>
+
+</body>
+</html>
